@@ -23,7 +23,7 @@ class EndStreamProcessor(StreamProcessor):
             self.route_position[end_node_id] = 0
         self.current_stream_chunk_generating_node_ids: dict[str, list[str]] = {}
         self.has_output = False
-        self.output_node_ids = set()
+        self.output_node_ids: set[str] = set()
 
     def process(self, generator: Generator[GraphEngineEvent, None, None]) -> Generator[GraphEngineEvent, None, None]:
         for event in generator:
@@ -33,7 +33,7 @@ class EndStreamProcessor(StreamProcessor):
 
                 yield event
             elif isinstance(event, NodeRunStreamChunkEvent):
-                if event.in_iteration_id:
+                if event.in_iteration_id or event.in_loop_id:
                     if self.has_output and event.node_id not in self.output_node_ids:
                         event.chunk_content = "\n" + event.chunk_content
 
@@ -139,6 +139,7 @@ class EndStreamProcessor(StreamProcessor):
                         route_node_state=event.route_node_state,
                         parallel_id=event.parallel_id,
                         parallel_start_node_id=event.parallel_start_node_id,
+                        node_version=event.node_version,
                     )
 
                 self.route_position[end_node_id] += 1

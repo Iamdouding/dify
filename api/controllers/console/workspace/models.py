@@ -72,7 +72,11 @@ class DefaultModelApi(Resource):
                     model=model_setting["model"],
                 )
             except Exception as ex:
-                logging.exception(f"{model_setting['model_type']} save error: {ex}")
+                logging.exception(
+                    "Failed to update default model, model type: %s, model: %s",
+                    model_setting["model_type"],
+                    model_setting.get("model"),
+                )
                 raise ex
 
         return {"result": "success"}
@@ -156,7 +160,12 @@ class ModelProviderModelApi(Resource):
                         credentials=args["credentials"],
                     )
                 except CredentialsValidateFailedError as ex:
-                    logging.exception(f"save model credentials error: {ex}")
+                    logging.exception(
+                        "Failed to save model credentials, tenant_id: %s, model: %s, model_type: %s",
+                        tenant_id,
+                        args.get("model"),
+                        args.get("model_type"),
+                    )
                     raise ValueError(str(ex))
 
         return {"result": "success"}, 200
@@ -302,7 +311,7 @@ class ModelProviderModelValidateApi(Resource):
         model_provider_service = ModelProviderService()
 
         result = True
-        error = None
+        error = ""
 
         try:
             model_provider_service.model_credentials_validate(
@@ -319,7 +328,7 @@ class ModelProviderModelValidateApi(Resource):
         response = {"result": "success" if result else "error"}
 
         if not result:
-            response["error"] = error
+            response["error"] = error or ""
 
         return response
 
@@ -356,26 +365,26 @@ class ModelProviderAvailableModelApi(Resource):
         return jsonable_encoder({"data": models})
 
 
-api.add_resource(ModelProviderModelApi, "/workspaces/current/model-providers/<string:provider>/models")
+api.add_resource(ModelProviderModelApi, "/workspaces/current/model-providers/<path:provider>/models")
 api.add_resource(
     ModelProviderModelEnableApi,
-    "/workspaces/current/model-providers/<string:provider>/models/enable",
+    "/workspaces/current/model-providers/<path:provider>/models/enable",
     endpoint="model-provider-model-enable",
 )
 api.add_resource(
     ModelProviderModelDisableApi,
-    "/workspaces/current/model-providers/<string:provider>/models/disable",
+    "/workspaces/current/model-providers/<path:provider>/models/disable",
     endpoint="model-provider-model-disable",
 )
 api.add_resource(
-    ModelProviderModelCredentialApi, "/workspaces/current/model-providers/<string:provider>/models/credentials"
+    ModelProviderModelCredentialApi, "/workspaces/current/model-providers/<path:provider>/models/credentials"
 )
 api.add_resource(
-    ModelProviderModelValidateApi, "/workspaces/current/model-providers/<string:provider>/models/credentials/validate"
+    ModelProviderModelValidateApi, "/workspaces/current/model-providers/<path:provider>/models/credentials/validate"
 )
 
 api.add_resource(
-    ModelProviderModelParameterRuleApi, "/workspaces/current/model-providers/<string:provider>/models/parameter-rules"
+    ModelProviderModelParameterRuleApi, "/workspaces/current/model-providers/<path:provider>/models/parameter-rules"
 )
 api.add_resource(ModelProviderAvailableModelApi, "/workspaces/current/models/model-types/<string:model_type>")
 api.add_resource(DefaultModelApi, "/workspaces/current/default-model")

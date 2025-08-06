@@ -1,5 +1,3 @@
-import datetime
-
 from flask import request
 from flask_restful import Resource, reqparse
 
@@ -7,8 +5,9 @@ from constants.languages import supported_language
 from controllers.console import api
 from controllers.console.error import AlreadyActivateError
 from extensions.ext_database import db
+from libs.datetime_utils import naive_utc_now
 from libs.helper import StrLen, email, extract_remote_ip, timezone
-from models.account import AccountStatus, Tenant
+from models.account import AccountStatus
 from services.account_service import AccountService, RegisterService
 
 
@@ -27,7 +26,7 @@ class ActivateCheckApi(Resource):
         invitation = RegisterService.get_invitation_if_token_valid(workspaceId, reg_email, token)
         if invitation:
             data = invitation.get("data", {})
-            tenant: Tenant = invitation.get("tenant", None)
+            tenant = invitation.get("tenant", None)
             workspace_name = tenant.name if tenant else None
             workspace_id = tenant.id if tenant else None
             invitee_email = data.get("email") if data else None
@@ -65,7 +64,7 @@ class ActivateApi(Resource):
         account.timezone = args["timezone"]
         account.interface_theme = "light"
         account.status = AccountStatus.ACTIVE.value
-        account.initialized_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        account.initialized_at = naive_utc_now()
         db.session.commit()
 
         token_pair = AccountService.login(account, ip_address=extract_remote_ip(request))

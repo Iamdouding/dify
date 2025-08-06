@@ -1,10 +1,10 @@
 import logging
 from typing import Optional
 
-import resend
 from flask import Flask
 
 from configs import dify_config
+from dify_app import DifyApp
 
 
 class Mail:
@@ -26,6 +26,8 @@ class Mail:
 
         match mail_type:
             case "resend":
+                import resend
+
                 api_key = dify_config.RESEND_API_KEY
                 if not api_key:
                     raise ValueError("RESEND_API_KEY is not set")
@@ -46,14 +48,23 @@ class Mail:
                 self._client = SMTPClient(
                     server=dify_config.SMTP_SERVER,
                     port=dify_config.SMTP_PORT,
-                    username=dify_config.SMTP_USERNAME,
-                    password=dify_config.SMTP_PASSWORD,
-                    _from=dify_config.MAIL_DEFAULT_SEND_FROM,
+                    username=dify_config.SMTP_USERNAME or "",
+                    password=dify_config.SMTP_PASSWORD or "",
+                    _from=dify_config.MAIL_DEFAULT_SEND_FROM or "",
                     use_tls=dify_config.SMTP_USE_TLS,
                     opportunistic_tls=dify_config.SMTP_OPPORTUNISTIC_TLS,
                 )
+            case "sendgrid":
+                from libs.sendgrid import SendGridClient
+
+                if not dify_config.SENDGRID_API_KEY:
+                    raise ValueError("SENDGRID_API_KEY is required for SendGrid mail type")
+
+                self._client = SendGridClient(
+                    sendgrid_api_key=dify_config.SENDGRID_API_KEY, _from=dify_config.MAIL_DEFAULT_SEND_FROM or ""
+                )
             case _:
-                raise ValueError("Unsupported mail type {}".format(mail_type))
+                raise ValueError(f"Unsupported mail type {mail_type}")
 
     def send(self, to: str, subject: str, html: str, from_: Optional[str] = None):
         if not self._client:
@@ -84,7 +95,11 @@ class Mail:
         )
 
 
-def init_app(app: Flask):
+def is_enabled() -> bool:
+    return dify_config.MAIL_TYPE is not None and dify_config.MAIL_TYPE != ""
+
+
+def init_app(app: DifyApp):
     mail.init_app(app)
 
 

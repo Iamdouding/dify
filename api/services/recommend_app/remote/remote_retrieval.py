@@ -20,7 +20,7 @@ class RemoteRecommendAppRetrieval(RecommendAppRetrievalBase):
         try:
             result = self.fetch_recommended_app_detail_from_dify_official(app_id)
         except Exception as e:
-            logger.warning(f"fetch recommended app detail from dify official failed: {e}, switch to built-in.")
+            logger.warning("fetch recommended app detail from dify official failed: %s, switch to built-in.", e)
             result = BuildInRecommendAppRetrieval.fetch_recommended_app_detail_from_builtin(app_id)
         return result
 
@@ -28,7 +28,7 @@ class RemoteRecommendAppRetrieval(RecommendAppRetrievalBase):
         try:
             result = self.fetch_recommended_apps_from_dify_official(language)
         except Exception as e:
-            logger.warning(f"fetch recommended apps from dify official failed: {e}, switch to built-in.")
+            logger.warning("fetch recommended apps from dify official failed: %s, switch to built-in.", e)
             result = BuildInRecommendAppRetrieval.fetch_recommended_apps_from_builtin(language)
         return result
 
@@ -47,8 +47,8 @@ class RemoteRecommendAppRetrieval(RecommendAppRetrievalBase):
         response = requests.get(url, timeout=(3, 10))
         if response.status_code != 200:
             return None
-
-        return response.json()
+        data: dict = response.json()
+        return data
 
     @classmethod
     def fetch_recommended_apps_from_dify_official(cls, language: str) -> dict:
@@ -63,7 +63,7 @@ class RemoteRecommendAppRetrieval(RecommendAppRetrievalBase):
         if response.status_code != 200:
             raise ValueError(f"fetch recommended apps failed, status code: {response.status_code}")
 
-        result = response.json()
+        result: dict = response.json()
 
         if "categories" in result:
             result["categories"] = sorted(result["categories"])

@@ -5,14 +5,14 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
-from couchbase import search
-from couchbase.auth import PasswordAuthenticator
-from couchbase.cluster import Cluster
-from couchbase.management.search import SearchIndex
+from couchbase import search  # type: ignore
+from couchbase.auth import PasswordAuthenticator  # type: ignore
+from couchbase.cluster import Cluster  # type: ignore
+from couchbase.management.search import SearchIndex  # type: ignore
 
 # needed for options -- cluster, timeout, SQL++ (N1QL) query, etc.
-from couchbase.options import ClusterOptions, SearchOptions
-from couchbase.vector_search import VectorQuery, VectorSearch
+from couchbase.options import ClusterOptions, SearchOptions  # type: ignore
+from couchbase.vector_search import VectorQuery, VectorSearch  # type: ignore
 from flask import current_app
 from pydantic import BaseModel, model_validator
 
@@ -74,9 +74,9 @@ class CouchbaseVector(BaseVector):
         self.add_texts(texts, embeddings)
 
     def _create_collection(self, vector_length: int, uuid: str):
-        lock_name = "vector_indexing_lock_{}".format(self._collection_name)
+        lock_name = f"vector_indexing_lock_{self._collection_name}"
         with redis_client.lock(lock_name, timeout=20):
-            collection_exist_cache_key = "vector_indexing_{}".format(self._collection_name)
+            collection_exist_cache_key = f"vector_indexing_{self._collection_name}"
             if redis_client.get(collection_exist_cache_key):
                 return
             if self._collection_exists(self._collection_name):
@@ -231,7 +231,7 @@ class CouchbaseVector(BaseVector):
         # Pass the id as a parameter to the query
         result = self._cluster.query(query, named_parameters={"doc_id": id}).execute()
         for row in result:
-            return row["count"] > 0
+            return bool(row["count"] > 0)
         return False  # Return False if no rows are returned
 
     def delete_by_ids(self, ids: list[str]) -> None:
@@ -242,7 +242,7 @@ class CouchbaseVector(BaseVector):
         try:
             self._cluster.query(query, named_parameters={"doc_ids": ids}).execute()
         except Exception as e:
-            logger.error(e)
+            logger.exception("Failed to delete documents, ids: %s", ids)
 
     def delete_by_document_id(self, document_id: str):
         query = f"""
@@ -369,10 +369,10 @@ class CouchbaseVectorFactory(AbstractVectorFactory):
         return CouchbaseVector(
             collection_name=collection_name,
             config=CouchbaseConfig(
-                connection_string=config.get("COUCHBASE_CONNECTION_STRING"),
-                user=config.get("COUCHBASE_USER"),
-                password=config.get("COUCHBASE_PASSWORD"),
-                bucket_name=config.get("COUCHBASE_BUCKET_NAME"),
-                scope_name=config.get("COUCHBASE_SCOPE_NAME"),
+                connection_string=config.get("COUCHBASE_CONNECTION_STRING", ""),
+                user=config.get("COUCHBASE_USER", ""),
+                password=config.get("COUCHBASE_PASSWORD", ""),
+                bucket_name=config.get("COUCHBASE_BUCKET_NAME", ""),
+                scope_name=config.get("COUCHBASE_SCOPE_NAME", ""),
             ),
         )

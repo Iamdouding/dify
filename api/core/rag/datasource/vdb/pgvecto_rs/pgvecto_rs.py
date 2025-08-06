@@ -4,9 +4,9 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from numpy import ndarray
-from pgvecto_rs.sqlalchemy import VECTOR
+from pgvecto_rs.sqlalchemy import VECTOR  # type: ignore
 from pydantic import BaseModel, model_validator
-from sqlalchemy import Float, String, create_engine, insert, select, text
+from sqlalchemy import Float, create_engine, insert, select, text
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, Session, mapped_column
@@ -58,7 +58,7 @@ class PGVectoRS(BaseVector):
         with Session(self._client) as session:
             session.execute(text("CREATE EXTENSION IF NOT EXISTS vectors"))
             session.commit()
-        self._fields = []
+        self._fields: list[str] = []
 
         class _Table(CollectionORM):
             __tablename__ = collection_name
@@ -67,7 +67,7 @@ class PGVectoRS(BaseVector):
                 postgresql.UUID(as_uuid=True),
                 primary_key=True,
             )
-            text: Mapped[str] = mapped_column(String)
+            text: Mapped[str]
             meta: Mapped[dict] = mapped_column(postgresql.JSONB)
             vector: Mapped[ndarray] = mapped_column(VECTOR(dim))
 
@@ -82,9 +82,9 @@ class PGVectoRS(BaseVector):
         self.add_texts(texts, embeddings)
 
     def create_collection(self, dimension: int):
-        lock_name = "vector_indexing_lock_{}".format(self._collection_name)
+        lock_name = f"vector_indexing_lock_{self._collection_name}"
         with redis_client.lock(lock_name, timeout=20):
-            collection_exist_cache_key = "vector_indexing_{}".format(self._collection_name)
+            collection_exist_cache_key = f"vector_indexing_{self._collection_name}"
             if redis_client.get(collection_exist_cache_key):
                 return
             index_name = f"{self._collection_name}_embedding_index"
@@ -189,6 +189,9 @@ class PGVectoRS(BaseVector):
                 .limit(kwargs.get("top_k", 4))
                 .order_by("distance")
             )
+            document_ids_filter = kwargs.get("document_ids_filter")
+            if document_ids_filter:
+                stmt = stmt.where(self._table.meta["document_id"].in_(document_ids_filter))
             res = session.execute(stmt)
             results = [(row[0], row[1]) for row in res]
 
@@ -222,11 +225,11 @@ class PGVectoRSFactory(AbstractVectorFactory):
         return PGVectoRS(
             collection_name=collection_name,
             config=PgvectoRSConfig(
-                host=dify_config.PGVECTO_RS_HOST,
-                port=dify_config.PGVECTO_RS_PORT,
-                user=dify_config.PGVECTO_RS_USER,
-                password=dify_config.PGVECTO_RS_PASSWORD,
-                database=dify_config.PGVECTO_RS_DATABASE,
+                host=dify_config.PGVECTO_RS_HOST or "localhost",
+                port=dify_config.PGVECTO_RS_PORT or 5432,
+                user=dify_config.PGVECTO_RS_USER or "postgres",
+                password=dify_config.PGVECTO_RS_PASSWORD or "",
+                database=dify_config.PGVECTO_RS_DATABASE or "postgres",
             ),
             dim=dim,
         )

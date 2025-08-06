@@ -7,6 +7,10 @@ from core.workflow.nodes.base import BaseNodeData
 from core.workflow.nodes.llm import ModelConfig, VisionConfig
 
 
+class _ParameterConfigError(Exception):
+    pass
+
+
 class ParameterConfig(BaseModel):
     """
     Parameter Config.
@@ -25,7 +29,20 @@ class ParameterConfig(BaseModel):
             raise ValueError("Parameter name is required")
         if value in {"__reason", "__is_success"}:
             raise ValueError("Invalid parameter name, __reason and __is_success are reserved")
-        return value
+        return str(value)
+
+    def is_array_type(self) -> bool:
+        return self.type in ("array[string]", "array[number]", "array[object]")
+
+    def element_type(self) -> Literal["string", "number", "object"]:
+        if self.type == "array[number]":
+            return "number"
+        elif self.type == "array[string]":
+            return "string"
+        elif self.type == "array[object]":
+            return "object"
+        else:
+            raise _ParameterConfigError(f"{self.type} is not array type.")
 
 
 class ParameterExtractorNodeData(BaseNodeData):
@@ -52,7 +69,7 @@ class ParameterExtractorNodeData(BaseNodeData):
 
         :return: parameter json schema
         """
-        parameters = {"type": "object", "properties": {}, "required": []}
+        parameters: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 
         for parameter in self.parameters:
             parameter_schema: dict[str, Any] = {"description": parameter.description}

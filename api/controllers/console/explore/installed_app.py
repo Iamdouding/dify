@@ -1,5 +1,7 @@
-from datetime import datetime, timezone
+import logging
+from typing import Any
 
+from flask import request
 from flask_login import current_user
 from flask_restful import Resource, inputs, marshal_with, reqparse
 from sqlalchemy import and_
@@ -10,9 +12,15 @@ from controllers.console.explore.wraps import InstalledAppResource
 from controllers.console.wraps import account_initialization_required, cloud_edition_billing_resource_check
 from extensions.ext_database import db
 from fields.installed_app_fields import installed_app_list_fields
+from libs.datetime_utils import naive_utc_now
 from libs.login import login_required
 from models import App, InstalledApp, RecommendedApp
 from services.account_service import TenantService
+from services.app_service import AppService
+from services.enterprise.enterprise_service import EnterpriseService
+from services.feature_service import FeatureService
+
+logger = logging.getLogger(__name__)
 
 
 class InstalledAppsListApi(Resource):
@@ -20,11 +28,20 @@ class InstalledAppsListApi(Resource):
     @account_initialization_required
     @marshal_with(installed_app_list_fields)
     def get(self):
+        app_id = request.args.get("app_id", default=None, type=str)
         current_tenant_id = current_user.current_tenant_id
-        installed_apps = db.session.query(InstalledApp).filter(InstalledApp.tenant_id == current_tenant_id).all()
+
+        if app_id:
+            installed_apps = (
+                db.session.query(InstalledApp)
+                .where(and_(InstalledApp.tenant_id == current_tenant_id, InstalledApp.app_id == app_id))
+                .all()
+            )
+        else:
+            installed_apps = db.session.query(InstalledApp).where(InstalledApp.tenant_id == current_tenant_id).all()
 
         current_user.role = TenantService.get_user_role(current_user, current_user.current_tenant)
-        installed_apps = [
+        installed_app_list: list[dict[str, Any]] = [
             {
                 "id": installed_app.id,
                 "app": installed_app.app,
@@ -37,7 +54,46 @@ class InstalledAppsListApi(Resource):
             for installed_app in installed_apps
             if installed_app.app is not None
         ]
-        installed_apps.sort(
+
+        # filter out apps that user doesn't have access to
+        if FeatureService.get_system_features().webapp_auth.enabled:
+            user_id = current_user.id
+            app_ids = [installed_app["app"].id for installed_app in installed_app_list]
+            webapp_settings = EnterpriseService.WebAppAuth.batch_get_app_access_mode_by_id(app_ids)
+
+            # Pre-filter out apps without setting or with sso_verified
+            filtered_installed_apps = []
+            app_id_to_app_code = {}
+
+            for installed_app in installed_app_list:
+                app_id = installed_app["app"].id
+                webapp_setting = webapp_settings.get(app_id)
+                if not webapp_setting or webapp_setting.access_mode == "sso_verified":
+                    continue
+                app_code = AppService.get_app_code_by_id(str(app_id))
+                app_id_to_app_code[app_id] = app_code
+                filtered_installed_apps.append(installed_app)
+
+            app_codes = list(app_id_to_app_code.values())
+
+            # Batch permission check
+            permissions = EnterpriseService.WebAppAuth.batch_is_user_allowed_to_access_webapps(
+                user_id=user_id,
+                app_codes=app_codes,
+            )
+
+            # Keep only allowed apps
+            res = []
+            for installed_app in filtered_installed_apps:
+                app_id = installed_app["app"].id
+                app_code = app_id_to_app_code[app_id]
+                if permissions.get(app_code):
+                    res.append(installed_app)
+
+            installed_app_list = res
+            logger.debug("installed_app_list: %s, user_id: %s", installed_app_list, user_id)
+
+        installed_app_list.sort(
             key=lambda app: (
                 -app["is_pinned"],
                 app["last_used_at"] is None,
@@ -45,7 +101,7 @@ class InstalledAppsListApi(Resource):
             )
         )
 
-        return {"installed_apps": installed_apps}
+        return {"installed_apps": installed_app_list}
 
     @login_required
     @account_initialization_required
@@ -55,12 +111,12 @@ class InstalledAppsListApi(Resource):
         parser.add_argument("app_id", type=str, required=True, help="Invalid app_id")
         args = parser.parse_args()
 
-        recommended_app = RecommendedApp.query.filter(RecommendedApp.app_id == args["app_id"]).first()
+        recommended_app = db.session.query(RecommendedApp).where(RecommendedApp.app_id == args["app_id"]).first()
         if recommended_app is None:
             raise NotFound("App not found")
 
         current_tenant_id = current_user.current_tenant_id
-        app = db.session.query(App).filter(App.id == args["app_id"]).first()
+        app = db.session.query(App).where(App.id == args["app_id"]).first()
 
         if app is None:
             raise NotFound("App not found")
@@ -68,9 +124,11 @@ class InstalledAppsListApi(Resource):
         if not app.is_public:
             raise Forbidden("You can't install a non-public app")
 
-        installed_app = InstalledApp.query.filter(
-            and_(InstalledApp.app_id == args["app_id"], InstalledApp.tenant_id == current_tenant_id)
-        ).first()
+        installed_app = (
+            db.session.query(InstalledApp)
+            .where(and_(InstalledApp.app_id == args["app_id"], InstalledApp.tenant_id == current_tenant_id))
+            .first()
+        )
 
         if installed_app is None:
             # todo: position
@@ -81,7 +139,7 @@ class InstalledAppsListApi(Resource):
                 tenant_id=current_tenant_id,
                 app_owner_tenant_id=app.tenant_id,
                 is_pinned=False,
-                last_used_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                last_used_at=naive_utc_now(),
             )
             db.session.add(new_installed_app)
             db.session.commit()
@@ -102,7 +160,7 @@ class InstalledAppApi(InstalledAppResource):
         db.session.delete(installed_app)
         db.session.commit()
 
-        return {"result": "success", "message": "App uninstalled successfully"}
+        return {"result": "success", "message": "App uninstalled successfully"}, 204
 
     def patch(self, installed_app):
         parser = reqparse.RequestParser()

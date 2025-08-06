@@ -1,5 +1,4 @@
 import mime from 'mime'
-import { flatten } from 'lodash-es'
 import { FileAppearanceTypeEnum } from './types'
 import type { FileEntity } from './types'
 import { upload } from '@/service/base'
@@ -43,22 +42,44 @@ export const fileUpload: FileUpload = ({
     })
 }
 
+const additionalExtensionMap = new Map<string, string[]>([
+  ['text/x-markdown', ['md']],
+])
+
 export const getFileExtension = (fileName: string, fileMimetype: string, isRemote?: boolean) => {
-  if (fileMimetype)
-    return mime.getExtension(fileMimetype) || ''
+  let extension = ''
+  let extensions = new Set<string>()
+  if (fileMimetype) {
+    const extensionsFromMimeType = mime.getAllExtensions(fileMimetype) || new Set<string>()
+    const additionalExtensions = additionalExtensionMap.get(fileMimetype) || []
+    extensions = new Set<string>([
+      ...extensionsFromMimeType,
+      ...additionalExtensions,
+    ])
+  }
 
-  if (isRemote)
-    return ''
-
+  let extensionInFileName = ''
   if (fileName) {
     const fileNamePair = fileName.split('.')
     const fileNamePairLength = fileNamePair.length
 
-    if (fileNamePairLength > 1)
-      return fileNamePair[fileNamePairLength - 1]
+    if (fileNamePairLength > 1) {
+      extensionInFileName = fileNamePair[fileNamePairLength - 1].toLowerCase()
+      if (extensions.has(extensionInFileName))
+        extension = extensionInFileName
+    }
+  }
+  if (!extension) {
+    if (extensions.size > 0)
+      extension = extensions.values().next().value.toLowerCase()
+    else
+      extension = extensionInFileName
   }
 
-  return ''
+  if (isRemote)
+    extension = ''
+
+  return extension
 }
 
 export const getFileAppearanceType = (fileName: string, fileMimetype: string) => {
@@ -82,7 +103,7 @@ export const getFileAppearanceType = (fileName: string, fileMimetype: string) =>
   if (extension === 'pdf')
     return FileAppearanceTypeEnum.pdf
 
-  if (extension === 'md' || extension === 'markdown')
+  if (extension === 'md' || extension === 'markdown' || extension === 'mdx')
     return FileAppearanceTypeEnum.markdown
 
   if (extension === 'xlsx' || extension === 'xls')
@@ -132,8 +153,8 @@ export const getProcessedFilesFromResponse = (files: FileResponse[]) => {
       progress: 100,
       transferMethod: fileItem.transfer_method,
       supportFileType: fileItem.type,
-      uploadedId: fileItem.related_id,
-      url: fileItem.url,
+      uploadedId: fileItem.upload_file_id || fileItem.related_id,
+      url: fileItem.url || fileItem.remote_url,
     }
   })
 }
@@ -145,7 +166,7 @@ export const getFileNameFromUrl = (url: string) => {
 
 export const getSupportFileExtensionList = (allowFileTypes: string[], allowFileExtensions: string[]) => {
   if (allowFileTypes.includes(SupportUploadFileTypes.custom))
-    return allowFileExtensions.map(item => item.toUpperCase())
+    return allowFileExtensions.map(item => item.slice(1).toUpperCase())
 
   return allowFileTypes.map(type => FILE_EXTS[type]).flat()
 }
@@ -155,12 +176,22 @@ export const isAllowedFileExtension = (fileName: string, fileMimetype: string, a
 }
 
 export const getFilesInLogs = (rawData: any) => {
-  const originalFiles = flatten(Object.keys(rawData || {}).map((key) => {
-    if (typeof rawData[key] === 'object' || Array.isArray(rawData[key]))
-      return rawData[key]
+  const result = Object.keys(rawData || {}).map((key) => {
+    if (typeof rawData[key] === 'object' && rawData[key]?.dify_model_identity === '__dify__file__') {
+      return {
+        varName: key,
+        list: getProcessedFilesFromResponse([rawData[key]]),
+      }
+    }
+    if (Array.isArray(rawData[key]) && rawData[key].some(item => item?.dify_model_identity === '__dify__file__')) {
+      return {
+        varName: key,
+        list: getProcessedFilesFromResponse(rawData[key]),
+      }
+    }
     return undefined
-  }).filter(Boolean)).filter(item => item?.model_identity === '__dify__file__')
-  return getProcessedFilesFromResponse(originalFiles)
+  }).filter(Boolean)
+  return result
 }
 
 export const fileIsUploaded = (file: FileEntity) => {
